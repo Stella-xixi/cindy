@@ -205,7 +205,7 @@ import {
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import * as sessionService from '@/lib/sessionService';
 import { emitRefresh } from '@/lib/sessionsBus';
-import type { Session } from '@/lib/ccAgent.types';
+import type { Message, Session } from '@/lib/ccAgent.types';
 import { toast } from '@/lib/toast';
 import {
   buildCreateOptsForCurrentSession,
@@ -217,6 +217,7 @@ import {
 } from '@/lib/makerChatStore';
 import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
 import { openSubagentsTab } from '@/features/right-sidebar/lib/openSubagentsTab';
+import { listSessionTasks } from '@/features/right-sidebar/plugins/background-tasks/listSessionTasks';
 import { summarizeBackgroundTasks, type BackgroundTaskSummary } from './backgroundTaskSummary';
 import { BotAvatar } from '@/features/bots/BotAvatar';
 import { BotSessionContentHeaderRegistration } from '@/features/bots/BotSessionContentHeader';
@@ -2145,11 +2146,20 @@ export function CCAgentSessionView({
   // 快照补回存量。与上面的 proxy 信号一起点亮状态栏后台模式。
   const backgroundBash = useBackgroundBashTasks(sessionId, taskUpdates, historyLoaded);
   const backgroundTaskSummary = useMemo(
-    () =>
-      isRemoteSession || remoteDeviceId
-        ? null
-        : summarizeBackgroundTasks(taskUpdates),
-    [isRemoteSession, remoteDeviceId, taskUpdates],
+    () => {
+      if (isRemoteSession || remoteDeviceId) return null;
+      return summarizeBackgroundTasks(
+        listSessionTasks({
+          // listSessionTasks explicitly supports the store-side ChatMessage shape;
+          // use the same projection as the sidebar so reloads retain terminal work.
+          messages: messages as unknown as readonly Message[],
+          taskUpdates,
+          isSessionStreaming: isStreaming,
+          subagentRunStatuses,
+        }),
+      );
+    },
+    [isRemoteSession, remoteDeviceId, messages, taskUpdates, isStreaming, subagentRunStatuses],
   );
   // 与运行态互斥(turn 一开跑 main 即广播熄灭,这里再加一道渲染守卫防瞬时竞态):
   // 只在「无 turn 在跑」时才把状态栏切到后台子任务模式。

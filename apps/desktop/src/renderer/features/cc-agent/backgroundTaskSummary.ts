@@ -1,4 +1,7 @@
-import type { AgentTaskUpdate } from '@/lib/makerChatStore';
+import type {
+  SessionTaskItem,
+  SessionTaskLists,
+} from '@/features/right-sidebar/plugins/background-tasks/listSessionTasks';
 
 export interface BackgroundTaskProgress {
   completed: number;
@@ -13,36 +16,30 @@ export interface BackgroundTaskSummary {
 const EMPTY_PROGRESS: BackgroundTaskProgress = { completed: 0, total: 0 };
 
 /**
- * Collapse the task-update map into user-facing progress counts.
- *
- * Updates are indexed by both taskId and parentToolUseId, so taskId is the
- * identity boundary. Workflows have their own composer status and are not
- * part of the Subagent/background-command summary.
+ * Collapse listSessionTasks' canonical task projection into user-facing
+ * progress counts. Keeping this downstream of listSessionTasks means live
+ * updates, restored history, durable subagent statuses, task cards, and the
+ * background-task sidebar all use the same terminal-state and dedupe rules.
+ * Workflows have their own composer status and are excluded here.
  */
 export function summarizeBackgroundTasks(
-  taskUpdates: ReadonlyMap<string, AgentTaskUpdate> | undefined,
+  taskLists: SessionTaskLists,
 ): BackgroundTaskSummary {
-  if (!taskUpdates || taskUpdates.size === 0) {
+  const items = [...taskLists.running, ...taskLists.completed];
+  const progress = (matches: (item: SessionTaskItem) => boolean): BackgroundTaskProgress => {
+    const matching = items.filter(matches);
+    return {
+      completed: matching.filter((item) => item.status !== 'running').length,
+      total: matching.length,
+    };
+  };
+
+  if (items.length === 0) {
     return { subagents: EMPTY_PROGRESS, commands: EMPTY_PROGRESS };
   }
 
-  const subagents = new Map<string, AgentTaskUpdate>();
-  const commands = new Map<string, AgentTaskUpdate>();
-  for (const update of taskUpdates.values()) {
-    const target =
-      update.taskType === 'local_bash'
-        ? commands
-        : update.taskType === 'local_workflow'
-          ? null
-          : subagents;
-    if (!target) continue;
-    target.set(update.taskId, update);
-  }
-
-  const progress = (updates: ReadonlyMap<string, AgentTaskUpdate>): BackgroundTaskProgress => ({
-    completed: [...updates.values()].filter((update) => update.status !== 'running').length,
-    total: updates.size,
-  });
-
-  return { subagents: progress(subagents), commands: progress(commands) };
+  return {
+    subagents: progress((item) => item.kind === 'agent' || item.kind === 'other'),
+    commands: progress((item) => item.kind === 'bash'),
+  };
 }
